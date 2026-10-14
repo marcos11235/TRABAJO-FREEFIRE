@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f5f0">
+  <meta name="description" content="Portal de revendedores con catálogo de recargas Free Fire y seguimiento de compras.">
+  <title>Vértice | Panel de revendedores</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main id="auth-screen" class="auth-screen">
+    <section class="auth-aside" aria-label="Vértice">
+      <a class="brand brand-light" href="#" aria-label="Vértice, inicio">
+        <span class="brand-mark" aria-hidden="true">V</span>
+        <span>vértice<span class="brand-dot">.</span></span>
+      </a>
+      <div class="auth-aside-content">
+        <span class="eyebrow eyebrow-light">PORTAL DE REVENDEDORES</span>
+        <h1>Tu operación,<br>en buen <span>orden.</span></h1>
+        <p>Gestiona tu operación y ofrece recargas de Free Fire desde un solo lugar.</p>
+      </div>
+      <div class="aside-bottom"><span class="status-indicator"></span> Plataforma de demostración</div>
+    </section>
+
+    <section class="auth-main">
+      <div class="auth-card">
+        <div class="auth-heading">
+          <span class="eyebrow">ACCESO AL PORTAL</span>
+          <h2 id="auth-title">Qué bueno verte.</h2>
+          <p id="auth-description">Inicia sesión para continuar con tu operación.</p>
+        </div>
+        <div class="auth-switch" role="tablist" aria-label="Tipo de acceso">
+          <button class="auth-tab is-active" id="login-tab" type="button" role="tab" aria-selected="true">Iniciar sesión</button>
+          <button class="auth-tab" id="register-tab" type="button" role="tab" aria-selected="false">Crear cuenta</button>
+        </div>
+        <form id="auth-form" novalidate>
+          <label id="name-field" class="field hidden">Nombre completo
+            <input id="name-input" name="name" autocomplete="name" placeholder="Ej. Daniela Ruiz" minlength="2">
+          </label>
+          <label id="email-label" class="field">Correo electrónico o usuario
+            <input id="email-input" name="email" type="text" autocomplete="username" placeholder="nombre@empresa.com" required>
+          </label>
+          <label class="field">Contraseña
+            <input id="password-input" name="password" type="password" autocomplete="current-password" placeholder="Mínimo 6 caracteres" minlength="6" required>
+          </label>
+          <p id="auth-message" class="form-message" role="alert" aria-live="polite"></p>
+          <button id="auth-submit" class="button button-dark button-wide" type="submit">Entrar al panel <span aria-hidden="true">&#8594;</span></button>
+        </form>
+        <p class="auth-footnote">Prototipo local: las cuentas, accesos y operaciones se guardan únicamente en este navegador. No uses datos sensibles.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="app-shell" class="app-shell hidden">
+    <div class="main-column">
+      <header class="topbar">
+        <a class="brand topbar-brand" href="#overview" aria-label="Vértice, resumen">
+          <span class="brand-mark" aria-hidden="true">V</span>
+          <span>vértice<span class="brand-dot">.</span></span>
+        </a>
+        <div class="catalog-label"><span class="status-indicator"></span> Recargas Free Fire · Diamantes</div>
+        <details class="account-menu">
+          <summary aria-label="Abrir opciones de cuenta">
+            <span id="user-avatar" class="avatar">V</span>
+            <span id="user-name-label" class="user-name-label"></span>
+            <span class="account-chevron" aria-hidden="true">&#9662;</span>
+          </summary>
+          <div class="account-dropdown">
+            <div class="account-dropdown-heading"><strong id="account-user-name"></strong><span id="account-user-role"></span></div>
+            <span id="selected-catalog-label" class="account-catalog-label">Free Fire</span>
+            <button id="logout-button" class="account-action" type="button">Cerrar sesión <span aria-hidden="true">&#8599;</span></button>
+          </div>
+        </details>
+        <div class="menu-area">
+          <button id="back-button" class="button button-outline" type="button"><span aria-hidden="true">&#8592;</span> Volver</button>
+          <button id="nav-toggle" class="menu-toggle" type="button" aria-expanded="false" aria-controls="main-nav"><span aria-hidden="true">&#9776;</span><span>Menú</span></button>
+          <nav id="main-nav" class="main-nav hidden" aria-label="Navegación principal">
+            <button class="nav-link customer-only" type="button" data-view="overview"><span class="nav-icon">&#9633;</span>Resumen</button>
+            <button class="nav-link customer-only" type="button" data-view="purchase"><span class="nav-icon">&#43;</span>Paquetes de diamantes</button>
+            <button class="nav-link customer-only" type="button" data-view="history"><span class="nav-icon">&#8635;</span>Historial</button>
+            <button class="nav-link admin-only hidden" type="button" data-view="users"><span class="nav-icon">&#9786;</span>Usuarios</button>
+            <button class="nav-link admin-only hidden" type="button" data-view="pins"><span class="nav-icon">&#9632;</span>Inventario de PINES</button>
+          </nav>
+        </div>
+      </header>
+
+      <main class="page-content">
+        <section class="view-section is-visible" id="view-overview" aria-labelledby="overview-title">
+          <div class="page-heading">
+            <div><span class="eyebrow">TU CENTRO DE OPERACIONES</span><h1 id="overview-title">Resumen</h1><p>Hola, <span id="welcome-name">equipo</span>. Aquí tienes el estado de tu operación.</p></div>
+            <button class="button button-lime" type="button" data-go="purchase"><span aria-hidden="true">&#43;</span> Hacer una compra</button>
+          </div>
+          <div class="metrics-grid">
+            <article class="metric-card"><div class="metric-top"><span>PINES entregados</span><span class="metric-symbol symbol-lime">&#9638;</span></div><strong id="metric-accounts">0</strong><span class="metric-caption">compras confirmadas</span></article>
+            <article class="metric-card"><div class="metric-top"><span>Compras realizadas</span><span class="metric-symbol symbol-coral">&#8599;</span></div><strong id="metric-purchases">0</strong><span class="metric-caption">en todo el historial</span></article>
+            <article class="metric-card"><div class="metric-top"><span>Pagos pendientes</span><span class="metric-symbol symbol-blue">&#9201;</span></div><strong id="metric-pending">0</strong><span class="metric-caption">esperando confirmación</span></article>
+            <article class="metric-card"><div class="metric-top"><span>Total de compras</span><span class="metric-symbol symbol-yellow">&#36;</span></div><strong id="metric-spent">0 <small>ARS</small></strong><span class="metric-caption">paquetes Free Fire</span></article>
+          </div>
+          <div class="section-heading"><div><span class="eyebrow">MOVIMIENTO RECIENTE</span><h2>Últimas operaciones</h2></div><button class="text-button" type="button" data-go="history">Ver historial <span aria-hidden="true">&#8594;</span></button></div>
+          <div class="table-wrap"><table><thead><tr><th>Operación</th><th>Fecha</th><th>Paquete</th><th>Total</th><th>Estado</th></tr></thead><tbody id="recent-orders-body"></tbody></table><div id="recent-empty" class="empty-state hidden"><span class="empty-mark">&#8644;</span><strong>Aún no hay operaciones</strong><span>Tu próxima compra de diamantes aparecerá aquí.</span><button class="text-button" type="button" data-go="purchase">Ver paquetes &#8594;</button></div></div>
+        </section>
+
+        <section class="view-section" id="view-purchase" aria-labelledby="purchase-title">
+          <div class="page-heading"><div><span class="eyebrow">CATÁLOGO · <span id="purchase-catalog-label">FREE FIRE</span></span><h1 id="purchase-title">Diamantes Free Fire</h1><p id="purchase-description">Precios de Latin GM convertidos a pesos argentinos, más $100 ARS de margen.</p></div></div>
+          <div id="plans-grid" class="plans-grid"></div>
+          <form id="freefire-checkout" class="freefire-checkout hidden">
+            <div class="panel-heading"><span class="panel-index">01</span><div><h2>Datos de entrega</h2><p id="freefire-selected-package">Selecciona un paquete para continuar.</p></div></div>
+            <input id="freefire-package-id" type="hidden">
+            <label class="field">Nombre completo<input id="freefire-customer-name" name="name" autocomplete="name" minlength="2" maxlength="100" required></label>
+            <label class="field">Correo electrónico<input id="freefire-customer-email" name="email" type="email" autocomplete="email" maxlength="254" required></label>
+            <small id="freefire-checkout-help" class="checkout-help">El botón se habilita al elegir un paquete con PIN disponible y con Mercado Pago configurado.</small>
+            <p id="freefire-checkout-message" class="form-message" role="alert" aria-live="polite"></p>
+            <button id="freefire-checkout-submit" class="button button-dark" type="submit" disabled>Continuar a Mercado Pago <span aria-hidden="true">&#8594;</span></button>
+          </form>
+          <div id="freefire-catalog-status" class="info-strip hidden" role="status" aria-live="polite"><span class="info-icon">i</span><p id="freefire-catalog-message"></p></div>
+          <div class="info-strip"><span class="info-icon">i</span><p id="purchase-info-text">Recibe por pantalla y correo un PIN canjeable si el pago se aprueba. Se asigna un código único del inventario disponible.</p></div>
+        </section>
+
+        <section class="view-section admin-only hidden" id="view-pins" aria-labelledby="pins-title">
+          <div class="page-heading"><div><span class="eyebrow">ADMINISTRACIÓN</span><h1 id="pins-title">Inventario de PINES</h1><p>Agrega códigos en lote pegando uno por línea. Los PINES se cifran al guardarse.</p></div></div>
+          <div class="inventory-layout">
+            <form id="pins-import-form" class="form-panel">
+              <div class="panel-heading"><span class="panel-index">01</span><div><h2>Cargar códigos</h2><p>El lote completo se importa o se rechaza; no se guardan lotes parciales.</p></div></div>
+              <label class="field">Token de administrador
+                <input id="pins-admin-token" type="password" autocomplete="off" required minlength="32" placeholder="Pega tu token de inventario">
+                <small>Se usa solo durante esta sesión; no se guarda en el navegador.</small>
+              </label>
+              <label class="field">Paquete de diamantes
+                <select id="pins-package-id" required><option value="">Cargando paquetes...</option></select>
+              </label>
+              <button id="pins-retry-packages" class="button button-outline hidden" type="button">Reintentar carga de paquetes</button>
+              <label class="field">Códigos PIN
+                <textarea id="pins-codes" rows="9" required placeholder="Un PIN por línea&#10;ABCDEF-123456&#10;GHIJKL-789012"></textarea>
+                <small>Entre 1 y 1000 códigos alfanuméricos o con guiones, uno por línea. No se admiten duplicados.</small>
+              </label>
+              <p id="pins-import-message" class="form-message" role="status" aria-live="polite"></p>
+              <button id="pins-import-submit" class="button button-dark" type="submit">Agregar PINES al inventario <span aria-hidden="true">&#8594;</span></button>
+            </form>
+            <section class="review-panel" aria-labelledby="pins-stock-title">
+              <div class="panel-heading"><span class="panel-index panel-index-warm">02</span><div><h2 id="pins-stock-title">Stock actual</h2><p>Disponibles para vender por paquete.</p></div></div>
+              <button id="pins-refresh-stock" class="button button-outline" type="button">Actualizar stock</button>
+              <div id="pins-stock-list" class="pins-stock-list" aria-live="polite"></div>
+            </section>
+          </div>
+          <div class="demo-banner"><span class="demo-banner-icon">!</span><p>El administrador debe proteger el token y la clave de cifrado. No ingreses PINES reales en una web de prueba o conexión sin HTTPS.</p></div>
+        </section>
+
+        <section class="view-section" id="view-history" aria-labelledby="history-title">
+          <div class="page-heading"><div><span class="eyebrow">REGISTRO DE ACTIVIDAD</span><h1 id="history-title">Historial</h1><p>Consulta tus compras y el estado de cada pago.</p></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Fecha</th><th>Paquete</th><th>Diamantes</th><th>Total</th><th>Estado</th></tr></thead><tbody id="history-body"></tbody></table><div id="history-empty" class="empty-state hidden"><span class="empty-mark">&#8635;</span><strong>No hay compras todavía</strong><span>Cuando compres diamantes, la operación aparecerá aquí.</span><button class="button button-dark" type="button" data-go="purchase">Ver paquetes <span aria-hidden="true">&#8594;</span></button></div></div>
+        </section>
+
+        <section class="view-section admin-only hidden" id="view-users" aria-labelledby="users-title">
+          <div class="page-heading"><div><span class="eyebrow">ACCESO AL PORTAL</span><h1 id="users-title">Usuarios</h1><p>Consulta las cuentas de acceso al panel de revendedores.</p></div><span id="users-total-chip" class="subtle-chip">0 usuarios</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Usuario</th><th>Correo</th><th>Registro</th><th>Último ingreso</th><th>Ingresos</th></tr></thead><tbody id="users-body"></tbody></table><div id="users-empty" class="empty-state hidden"><span class="empty-mark">&#9786;</span><strong>No hay usuarios registrados</strong><span>Las cuentas de acceso creadas aparecerán aquí.</span></div></div>
+          <div class="demo-banner"><span class="demo-banner-icon">!</span><p>Prototipo local: el panel de administración solo está restringido en la interfaz. Los datos viven en este navegador; para uso real hace falta autenticación y control de acceso en el servidor.</p></div>
+        </section>
+
+      </main>
+      <footer class="app-footer"><span>VÉRTICE <span class="brand-dot">.</span> PROTOTIPO</span><span>Portal de gestión para revendedores</span></footer>
+    </div>
+  </div>
+  <main id="freefire-result" class="freefire-result hidden" aria-live="polite">
+    <section class="freefire-result-card">
+      <span class="eyebrow">TU COMPRA FREE FIRE</span>
+      <h1 id="freefire-result-title">Consultando tu compra...</h1>
+      <p id="freefire-result-message"></p>
+      <p id="freefire-result-reference" class="order-reference"></p>
+      <section id="freefire-pin-delivery" class="freefire-pin-delivery hidden" aria-labelledby="freefire-pin-heading">
+        <h2 id="freefire-pin-heading">Tu código PIN</h2>
+        <code id="freefire-pin-code" class="freefire-pin-code"></code>
+        <button id="freefire-copy-pin" class="button button-lime" type="button">Copiar código PIN</button>
+        <h3>Instrucciones para canjearlo</h3>
+        <ol id="freefire-redemption-instructions">
+          <li>Entra a <a href="https://pagostore.garena.com/" target="_blank" rel="noopener noreferrer">PagoStore de Garena</a>.</li>
+          <li>Inicia sesión con el método asociado a tu cuenta de Free Fire.</li>
+          <li>Elige la opción de canje o recarga con PIN y el paquete comprado.</li>
+          <li>Ingresa el código PIN, confirma el canje y revisa tu cuenta.</li>
+        </ol>
+      </section>
+      <button id="freefire-refresh-order" class="button button-outline hidden" type="button">Consultar estado</button>
+      <button id="freefire-result-back" class="button button-dark" type="button">Volver al portal</button>
+      <p id="freefire-copy-message" class="form-message" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+</body>
+</html>
