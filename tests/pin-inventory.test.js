@@ -7,7 +7,7 @@ const {
   importPins,
   markOrderEmailSent,
   releaseOrderEmailClaim
-} = require("../pin-inventory");
+} = require("../app/pin-inventory");
 
 const key = decodeEncryptionKey(Buffer.alloc(32, 7).toString("base64"));
 const packageId = "latin-gm-305106";

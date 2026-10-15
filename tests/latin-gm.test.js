@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseLatinGmPackages } = require("../latin-gm");
+const { parseLatinGmPackages } = require("../app/latin-gm");
 
 test("parses available Latin GM variations and diamond counts", () => {
   const html = `

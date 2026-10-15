@@ -15,9 +15,9 @@ const {
   releaseOrderEmailClaim
 } = require("./pin-inventory");
 
-loadEnvFile();
+const root = path.resolve(__dirname, "..");
 
-const root = __dirname;
+loadEnvFile();
 
 const PRICE_CACHE_MS = 60 * 60 * 1000;
 const contentTypes = {
@@ -29,7 +29,7 @@ const contentTypes = {
 };
 
 function loadEnvFile() {
-  const envPath = path.join(__dirname, ".env");
+  const envPath = path.join(root, "config", ".env");
   if (!fs.existsSync(envPath)) return;
   for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
     const match = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);

@@ -7,27 +7,22 @@ El catálogo y el flujo de compra están enfocados exclusivamente en paquetes de
 ## Estructura
 
 ```text
-index.html              Catálogo, checkout y pantalla de entrega del PIN
-styles.css              Interfaz responsive
-client.js               Flujo frontend y consulta autenticada del pedido
-server.js               API HTTP, Supabase, Mercado Pago y webhook
-api/[...path].js        Adaptador de la API para funciones serverless de Vercel
-supabase-store.js       Cliente server-only de Supabase
-pin-inventory.js        Cifrado, importación, asignación atómica e idempotencia
-latin-gm.js             Lectura de variantes y precios de Latin GM
-pricing.js              Conversión USD/ARS y margen fijo
-database.sql             Esquema PostgreSQL, catálogo y funciones RPC de Supabase
-test/                    Pruebas de precios, scraper e inventario
-.env.example             Configuración de integraciones y secretos
-vercel.json              Configuración de despliegue
+index.html              Entrada web (único archivo en la raíz)
+assets/                 JavaScript del navegador y estilos
+api/                    Función serverless catch-all de Vercel
+app/                    API, Supabase, inventario, precios y proveedor
+config/                 package.json, lockfile, .env.example y .gitignore
+database/schema.sql     Esquema PostgreSQL y funciones RPC de Supabase
+docs/README.md          Esta guía
+tests/                  Pruebas de precios, scraper e inventario
 ```
 
 ## Ejecución
 
-Requiere Node.js 22.5 o posterior.
+Requiere Node.js 22.x.
 
-1. Crea un proyecto en Supabase y ejecuta `database.sql` desde el SQL Editor del proyecto.
-2. Copia `.env.example` a `.env` y configura `SUPABASE_URL` junto con la clave `service_role` en `SUPABASE_SERVICE_ROLE_KEY`. Esa clave solo se usa en el servidor: nunca la publiques ni la agregues al frontend.
+1. Crea un proyecto en Supabase y ejecuta `database/schema.sql` desde el SQL Editor del proyecto.
+2. Copia `config/.env.example` a `config/.env` y configura `SUPABASE_URL` junto con la clave `service_role` en `SUPABASE_SERVICE_ROLE_KEY`. Esa clave solo se usa en el servidor: nunca la publiques ni la agregues al frontend.
 3. Genera una clave de cifrado y un token administrativo:
 
    ```powershell
@@ -37,15 +32,17 @@ Requiere Node.js 22.5 o posterior.
 
    Guarda los resultados en `PIN_ENCRYPTION_KEY` e `INVENTORY_ADMIN_TOKEN`. **Conserva una copia segura de `PIN_ENCRYPTION_KEY`**: sin ella no se podrán recuperar los códigos cifrados.
 4. Configura las credenciales de Mercado Pago, la URL pública HTTPS y Resend.
-5. Para ejecutar localmente, usa `npm install` y `npm start`; para las pruebas, `npm test`.
+5. Para instalar dependencias localmente, ejecuta `npm --prefix config install`; inicia el servidor con `npm --prefix config start` y ejecuta las pruebas con `npm --prefix config test`.
 
 ### Despliegue en Vercel
 
-Importa el repositorio en Vercel con la raíz del proyecto como directorio raíz. Vercel sirve `index.html`, `client.js` y `styles.css` como archivos estáticos; las solicitudes `/api/*` se ejecutan mediante `api/[...path].js`. `client.js` usa `document` porque se ejecuta en el navegador; no lo configures como función de servidor.
+La raíz del repositorio contiene únicamente `index.html`; los demás archivos están agrupados en carpetas. `.gitignore` está en `config/` y excluye `config/.env` y `config/node_modules/`. Sube las carpetas `api/`, `app/`, `assets/`, `config/`, `database/`, `docs/` y `tests/` junto con `index.html`. No subas secretos ni dependencias instaladas.
 
-Agrega en **Project Settings → Environment Variables** las mismas variables del `.env.example` que necesita el servidor, incluidas `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `PIN_ENCRYPTION_KEY`, `INVENTORY_ADMIN_TOKEN`, las credenciales de Mercado Pago y Resend, y `PUBLIC_BASE_URL` con la URL HTTPS final del proyecto. La clave `service_role` debe permanecer únicamente en el entorno del servidor y no debe añadirse al frontend. Configura el webhook de Mercado Pago en `https://<tu-dominio>/api/webhooks/mercadopago`.
+En Vercel, importa el repositorio con la raíz del proyecto como directorio raíz y selecciona **Other** como framework. En **Build & Development Settings**, configura el comando de instalación como `npm install --prefix config`; deja el comando de build y el directorio de salida vacíos. Selecciona Node.js 22.x en la configuración de runtime. Vercel sirve `index.html` desde la raíz, los recursos desde `/assets/` y detecta `api/[...path].js` como función serverless para las rutas `/api/*`. No configures un directorio de salida ni reglas de rutas personalizadas.
 
-Vercel mantiene Supabase como almacenamiento persistente; no depende de archivos locales del servidor. El esquema de [`database.sql`](./database.sql) es el paso de preparación del proyecto Supabase, no una base SQLite ni una conexión SQL local. Las cuentas de acceso del prototipo todavía se guardan en el navegador y no son autenticación de Supabase.
+Agrega en **Project Settings → Environment Variables** las mismas variables de `config/.env.example` que necesita el servidor, incluidas `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `PIN_ENCRYPTION_KEY`, `INVENTORY_ADMIN_TOKEN`, las credenciales de Mercado Pago y Resend, y `PUBLIC_BASE_URL` con la URL HTTPS final del proyecto. La clave `service_role` debe permanecer únicamente en el entorno del servidor y no debe añadirse al frontend. Configura el webhook de Mercado Pago en `https://<tu-dominio>/api/webhooks/mercadopago`.
+
+Vercel mantiene Supabase como almacenamiento persistente; no depende de archivos locales del servidor. El esquema de [`database/schema.sql`](../database/schema.sql) es el paso de preparación del proyecto Supabase, no una base SQLite ni una conexión SQL local. Las cuentas de acceso del prototipo todavía se guardan en el navegador y no son autenticación de Supabase.
 
 La aplicación convierte los precios del catálogo de Latin GM a ARS usando la cotización oficial de venta y suma $100 ARS. Los precios y la fecha de actualización se guardan en Supabase y se actualizan cada hora. La venta requiere stock disponible del PIN correspondiente, pago confirmado y configuración válida de los servicios.
 
@@ -53,7 +50,7 @@ La aplicación convierte los precios del catálogo de Latin GM a ARS usando la c
 
 El panel de administración incluye **Inventario de PINES**: selecciona el paquete, ingresa el token administrativo y pega los códigos en el cuadro de texto, uno por línea. Pulsa **Agregar PINES al inventario**; el stock se actualiza al terminar. También puedes actualizar el stock con el botón de la sección.
 
-El selector consulta `GET /api/packages`, que devuelve los paquetes guardados en Supabase junto con su identificador y stock. `GET /api/freefire/packages` continúa disponible para compatibilidad. Una instalación nueva incluye paquetes base Free Fire en `database.sql`; si Latin GM o la cotización no responden, el servidor entrega esos datos o la caché de Supabase y pausa las ventas hasta recuperar precios actualizados, pero el selector sigue disponible para cargar PINES.
+El selector consulta `GET /api/packages`, que devuelve los paquetes guardados en Supabase junto con su identificador y stock. `GET /api/freefire/packages` continúa disponible para compatibilidad. Una instalación nueva incluye paquetes base Free Fire en `database/schema.sql`; si Latin GM o la cotización no responden, el servidor entrega esos datos o la caché de Supabase y pausa las ventas hasta recuperar precios actualizados, pero el selector sigue disponible para cargar PINES.
 
 El endpoint acepta códigos por lote y el token administrativo, por ejemplo:
 
@@ -69,7 +66,7 @@ Invoke-RestMethod -Uri "https://tu-dominio.example/api/admin/pines/stock" -Heade
 
 La importación admite entre 1 y 1000 códigos; rechaza duplicados y la inserción por lote de PostgreSQL se confirma completa o no se confirma. `codigo_pin` se cifra con AES-256-GCM y el IV/tag se guardan aparte; un HMAC evita volver a importar el mismo PIN sin almacenar su valor original. La tabla `pines` incluye estados `disponible`, `reservado` y `vendido`. La asignación se ejecuta en una función PostgreSQL transaccional con bloqueo de filas y asocia un solo PIN por orden, incluso ante webhooks concurrentes o repetidos.
 
-Las pruebas automatizadas usan un cliente Supabase simulado para verificar la importación cifrada, la asignación idempotente y el manejo de inventario agotado; se ejecutan con `npm test`. No hay un endpoint de simulación expuesto en producción que pueda alterar inventario real.
+Las pruebas automatizadas usan un cliente Supabase simulado para verificar la importación cifrada, la asignación idempotente y el manejo de inventario agotado; se ejecutan con `npm --prefix config test`. No hay un endpoint de simulación expuesto en producción que pueda alterar inventario real.
 
 ## Pago, entrega y agotamiento
 

@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { calculateFinalPriceArs } = require("../pricing");
+const { calculateFinalPriceArs } = require("../app/pricing");
 
 test("converts supplier USD price and adds exactly ARS 100", () => {
   assert.equal(calculateFinalPriceArs(0.73, 1535), 1221);
