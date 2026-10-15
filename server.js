@@ -2,7 +2,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { DatabaseSync } = require("node:sqlite");
+const { execute, getSupabase } = require("./supabase-store");
 const { scrapeLatinGmPackages } = require("./latin-gm");
 const { PROFIT_MARGIN_ARS, calculateFinalPriceArs } = require("./pricing");
 const {
@@ -18,60 +18,6 @@ const {
 loadEnvFile();
 
 const root = __dirname;
-const database = new DatabaseSync(path.join(root, "data.sqlite"));
-database.exec(fs.readFileSync(path.join(root, "database.sql"), "utf8"));
-
-function migrateLegacyOrders() {
-  const columns = database.prepare("PRAGMA table_info(freefire_orders)").all();
-  if (!columns.some(column => column.name === "player_id")) return;
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    database.exec("ALTER TABLE freefire_orders RENAME TO freefire_orders_legacy");
-    database.exec(`
-      CREATE TABLE freefire_orders (
-        id TEXT PRIMARY KEY,
-        package_id TEXT NOT NULL,
-        package_label TEXT NOT NULL,
-        diamonds INTEGER NOT NULL CHECK (diamonds > 0),
-        customer_name TEXT NOT NULL,
-        email TEXT NOT NULL,
-        amount_ars INTEGER NOT NULL CHECK (amount_ars > 0),
-        status TEXT NOT NULL CHECK (status IN (
-          'payment_pending', 'payment_error', 'paid', 'out_of_stock_pending_refund'
-        )),
-        fulfillment_status TEXT NOT NULL CHECK (fulfillment_status IN (
-          'not_started', 'assigned', 'out_of_stock_pending_refund', 'manual_required'
-        )),
-        access_token_hash TEXT NOT NULL,
-        preference_id TEXT,
-        payment_id TEXT UNIQUE,
-        created_at TEXT NOT NULL,
-        paid_at TEXT,
-        email_sent_at TEXT,
-        email_sending_at TEXT
-      )
-    `);
-    database.exec(`
-      INSERT INTO freefire_orders (
-        id, package_id, package_label, diamonds, customer_name, email, amount_ars,
-        status, fulfillment_status, access_token_hash, preference_id, payment_id,
-        created_at, paid_at, email_sent_at
-      )
-      SELECT id, package_id, package_label, diamonds, customer_name, email, amount_ars,
-        status, fulfillment_status, access_token_hash, preference_id, payment_id,
-        created_at, paid_at, email_sent_at
-      FROM freefire_orders_legacy
-    `);
-    database.exec("DROP TABLE freefire_orders_legacy");
-    database.exec("CREATE INDEX IF NOT EXISTS freefire_orders_created_at_idx ON freefire_orders (created_at DESC)");
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
-}
-
-migrateLegacyOrders();
 
 const PRICE_CACHE_MS = 60 * 60 * 1000;
 const contentTypes = {
@@ -101,6 +47,23 @@ function json(response, statusCode, data) {
 }
 
 async function readJson(request, allowEmpty = false) {
+  if (request.body !== undefined) {
+    const body = request.body;
+    const serialized = Buffer.isBuffer(body)
+      ? body
+      : Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
+    if (serialized.length > 256 * 1024) {
+      throw Object.assign(new Error("El cuerpo supera el límite permitido."), { statusCode: 413 });
+    }
+    if (body && typeof body === "object" && !Buffer.isBuffer(body)) return body;
+    if (allowEmpty && serialized.length === 0) return {};
+    try {
+      return JSON.parse(serialized.toString("utf8"));
+    } catch {
+      throw Object.assign(new Error("El cuerpo de la solicitud no es JSON válido."), { statusCode: 400 });
+    }
+  }
+
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
@@ -116,14 +79,8 @@ async function readJson(request, allowEmpty = false) {
   }
 }
 
-function getCachedPackages() {
-  return database.prepare(`
-    SELECT package.*,
-      (SELECT COUNT(*) FROM pines pin
-       WHERE pin.paquete_id = package.id AND pin.estado = 'disponible') AS stock_available
-    FROM freefire_packages package
-    ORDER BY package.diamonds ASC
-  `).all();
+async function getCachedPackages() {
+  return execute(getSupabase().rpc("get_freefire_packages"));
 }
 
 async function getOfficialUsdArsRate() {
@@ -139,11 +96,14 @@ async function getOfficialUsdArsRate() {
 }
 
 async function refreshCatalog() {
-  const previous = getCachedPackages();
-  const lastRefresh = database.prepare("SELECT value FROM app_settings WHERE key = 'catalog_updated_at'").get();
-  const cacheAge = lastRefresh ? Date.now() - Date.parse(lastRefresh.value) : Infinity;
+  const [previous, setting] = await Promise.all([
+    getCachedPackages(),
+    execute(getSupabase().from("app_settings").select("value").eq("key", "catalog_updated_at").maybeSingle())
+  ]);
+  const lastRefresh = setting?.value || null;
+  const cacheAge = lastRefresh ? Date.now() - Date.parse(lastRefresh) : Infinity;
   if (previous.length && cacheAge < PRICE_CACHE_MS) {
-    return { packages: previous, updatedAt: lastRefresh.value, stale: false, saleEnabled: true };
+    return { packages: previous, updatedAt: lastRefresh, stale: false, saleEnabled: true };
   }
 
   try {
@@ -154,50 +114,28 @@ async function refreshCatalog() {
     if (!supplierPackages.length) throw new Error("Latin GM no devolvió paquetes de diamantes disponibles.");
 
     const now = new Date().toISOString();
-    database.exec("BEGIN IMMEDIATE");
-    try {
-      const upsert = database.prepare(`
-        INSERT INTO freefire_packages
-          (id, label, diamonds, supplier_usd, usd_ars_rate, final_price_ars, supplier_url, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          label = excluded.label,
-          diamonds = excluded.diamonds,
-          supplier_usd = excluded.supplier_usd,
-          usd_ars_rate = excluded.usd_ars_rate,
-          final_price_ars = excluded.final_price_ars,
-          supplier_url = excluded.supplier_url,
-          updated_at = excluded.updated_at
-      `);
-      const currentIds = new Set();
-      supplierPackages.forEach(item => {
-        const id = `latin-gm-${item.variationId}`;
-        currentIds.add(id);
-        const supplierUsd = Number(item.priceUsd);
-        upsert.run(
-          id, item.label, item.diamonds, supplierUsd, usdArsRate,
-          calculateFinalPriceArs(supplierUsd, usdArsRate), item.productUrl, now
-        );
-      });
-      const removeMissing = database.prepare("DELETE FROM freefire_packages WHERE id = ?");
-      for (const oldItem of previous) {
-        if (!currentIds.has(oldItem.id)) removeMissing.run(oldItem.id);
-      }
-      database.prepare(`
-        INSERT INTO app_settings (key, value) VALUES ('catalog_updated_at', ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-      `).run(now);
-      database.exec("COMMIT");
-    } catch (error) {
-      database.exec("ROLLBACK");
-      throw error;
-    }
-    return { packages: getCachedPackages(), updatedAt: now, stale: false, saleEnabled: true };
+    const packages = supplierPackages.map(item => {
+      const supplierUsd = Number(item.priceUsd);
+      return {
+        id: `latin-gm-${item.variationId}`,
+        label: item.label,
+        diamonds: item.diamonds,
+        supplier_usd: supplierUsd,
+        usd_ars_rate: usdArsRate,
+        final_price_ars: calculateFinalPriceArs(supplierUsd, usdArsRate),
+        supplier_url: item.productUrl
+      };
+    });
+    await execute(getSupabase().rpc("refresh_freefire_packages", {
+      p_packages: packages,
+      p_updated_at: now
+    }));
+    return { packages: await getCachedPackages(), updatedAt: now, stale: false, saleEnabled: true };
   } catch (error) {
-    console.error("No se pudo actualizar el catálogo de Latin GM; se conserva la caché de SQLite.", error);
+    console.error("No se pudo actualizar el catálogo de Latin GM; se conserva la caché de Supabase.", error);
     return {
       packages: previous,
-      updatedAt: lastRefresh?.value || null,
+      updatedAt: lastRefresh,
       stale: true,
       saleEnabled: false,
       warning: `No se pudo actualizar el catálogo; se muestran los paquetes guardados y la compra está pausada. ${error.message}`
@@ -208,6 +146,7 @@ async function refreshCatalog() {
 function checkoutConfigured() {
   const hasPublicHttpsUrl = URL.canParse(process.env.PUBLIC_BASE_URL || "") &&
     new URL(process.env.PUBLIC_BASE_URL).protocol === "https:";
+  const hasSupabaseConfig = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
   let hasEncryptionKey = false;
   try {
     decodeEncryptionKey(process.env.PIN_ENCRYPTION_KEY);
@@ -219,6 +158,7 @@ function checkoutConfigured() {
     process.env.RESEND_API_KEY &&
     process.env.EMAIL_FROM &&
     hasPublicHttpsUrl &&
+    hasSupabaseConfig &&
     hasEncryptionKey &&
     inventoryConfigured()
   );
@@ -228,6 +168,8 @@ function inventoryConfigured() {
   return Boolean(
     process.env.INVENTORY_ADMIN_TOKEN &&
     process.env.INVENTORY_ADMIN_TOKEN.length >= 32 &&
+    process.env.SUPABASE_URL &&
+    process.env.SUPABASE_SERVICE_ROLE_KEY &&
     (() => {
       try {
         decodeEncryptionKey(process.env.PIN_ENCRYPTION_KEY);
@@ -385,13 +327,13 @@ async function handleWebhook(request, url, response) {
   if (payment.status !== "approved") return json(response, 200, { received: true, status: payment.status });
 
   const orderId = String(payment.external_reference || "");
-  const order = database.prepare("SELECT * FROM freefire_orders WHERE id = ?").get(orderId);
+  const order = await execute(getSupabase().from("freefire_orders").select("*").eq("id", orderId).maybeSingle());
   if (!order) return json(response, 404, { error: "No existe la compra asociada al pago." });
   if (Number(payment.transaction_amount) !== order.amount_ars || payment.currency_id !== "ARS") {
     return json(response, 409, { error: "El importe o la moneda del pago no coincide con la compra." });
   }
-  const fulfillment = assignPinToOrder(
-    database,
+  const fulfillment = await assignPinToOrder(
+    getSupabase(),
     decodeEncryptionKey(process.env.PIN_ENCRYPTION_KEY),
     order.id,
     String(payment.id)
@@ -401,14 +343,14 @@ async function handleWebhook(request, url, response) {
     return json(response, 200, { received: true, status: "out_of_stock_pending_refund" });
   }
 
-  const ownsEmailClaim = claimOrderEmail(database, order.id);
+  const ownsEmailClaim = await claimOrderEmail(getSupabase(), order.id);
   if (!ownsEmailClaim) return json(response, 200, { received: true, status: "approved" });
   try {
-    const paidOrder = database.prepare("SELECT * FROM freefire_orders WHERE id = ?").get(order.id);
+    const paidOrder = await execute(getSupabase().from("freefire_orders").select("*").eq("id", order.id).single());
     await sendPaymentEmail(paidOrder, fulfillment.pin);
-    markOrderEmailSent(database, order.id);
+    await markOrderEmailSent(getSupabase(), order.id);
   } catch (error) {
-    releaseOrderEmailClaim(database, order.id);
+    await releaseOrderEmailClaim(getSupabase(), order.id);
     console.error(`Pago ${payment.id} aprobado; error al enviar confirmación:`, error);
     return json(response, 503, { error: "Pago aprobado y PIN asignado, pero no se pudo enviar el correo; Mercado Pago puede reintentar el webhook." });
   }
@@ -449,7 +391,8 @@ async function handleApi(request, response, url) {
         return json(response, 400, { error: "Envía un objeto JSON con el paquete y los códigos." });
       }
       const packageId = typeof input.packageId === "string" ? input.packageId : "";
-      const packageExists = database.prepare("SELECT 1 FROM freefire_packages WHERE id = ?").get(packageId);
+      const packageExists = await execute(getSupabase().from("freefire_packages")
+        .select("id").eq("id", packageId).maybeSingle());
       if (!packageExists) {
         return json(response, 400, { error: "El paquete no existe en el catálogo actualizado." });
       }
@@ -458,8 +401,8 @@ async function handleApi(request, response, url) {
       if (!Array.isArray(codes)) {
         return json(response, 400, { error: "Envía `codes` como texto separado por líneas o como lista de códigos." });
       }
-      const result = importPins(
-        database,
+      const result = await importPins(
+        getSupabase(),
         decodeEncryptionKey(process.env.PIN_ENCRYPTION_KEY),
         packageId,
         codes
@@ -475,15 +418,7 @@ async function handleApi(request, response, url) {
     if (!hasValidInventoryAdminToken(request)) {
       return json(response, 401, { error: "Token de administración inválido." });
     }
-    const stock = database.prepare(`
-      SELECT paquete_id,
-        SUM(CASE WHEN estado = 'disponible' THEN 1 ELSE 0 END) AS disponible,
-        SUM(CASE WHEN estado = 'reservado' THEN 1 ELSE 0 END) AS reservado,
-        SUM(CASE WHEN estado = 'vendido' THEN 1 ELSE 0 END) AS vendido
-      FROM pines
-      GROUP BY paquete_id
-      ORDER BY paquete_id
-    `).all();
+    const stock = await execute(getSupabase().rpc("get_pin_stock"));
     return json(response, 200, { stock });
   }
   if (request.method === "POST" && url.pathname === "/api/freefire/orders") {
@@ -513,25 +448,27 @@ async function handleApi(request, response, url) {
 
       const id = crypto.randomUUID();
       const accessToken = crypto.randomBytes(32).toString("hex");
-      database.prepare(`
-        INSERT INTO freefire_orders
-          (id, package_id, package_label, diamonds, customer_name, email,
-           amount_ars, status, fulfillment_status, access_token_hash, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'payment_pending', 'not_started', ?, ?)
-      `).run(
-        id, selectedPackage.id, selectedPackage.label, selectedPackage.diamonds,
-        name, email, selectedPackage.final_price_ars,
-        crypto.createHash("sha256").update(accessToken).digest("hex"), new Date().toISOString()
-      );
-      const order = database.prepare("SELECT * FROM freefire_orders WHERE id = ?").get(id);
+      const order = await execute(getSupabase().from("freefire_orders").insert({
+        id,
+        package_id: selectedPackage.id,
+        package_label: selectedPackage.label,
+        diamonds: selectedPackage.diamonds,
+        customer_name: name,
+        email,
+        amount_ars: selectedPackage.final_price_ars,
+        status: "payment_pending",
+        fulfillment_status: "not_started",
+        access_token_hash: crypto.createHash("sha256").update(accessToken).digest("hex"),
+        created_at: new Date().toISOString()
+      }).select("*").single());
       const preferenceResponse = await createPaymentPreference(order, accessToken);
       if (!preferenceResponse.ok) {
         const details = await preferenceResponse.text();
-        database.prepare("UPDATE freefire_orders SET status = 'payment_error' WHERE id = ?").run(id);
+        await execute(getSupabase().from("freefire_orders").update({ status: "payment_error" }).eq("id", id));
         throw new Error(`Mercado Pago no pudo crear el checkout (HTTP ${preferenceResponse.status}): ${details.slice(0, 300)}`);
       }
       const preference = await preferenceResponse.json();
-      database.prepare("UPDATE freefire_orders SET preference_id = ? WHERE id = ?").run(preference.id, id);
+      await execute(getSupabase().from("freefire_orders").update({ preference_id: preference.id }).eq("id", id));
       return json(response, 201, {
         orderId: id,
         checkoutUrl: preference.init_point,
@@ -547,17 +484,16 @@ async function handleApi(request, response, url) {
     if (!/^[0-9a-f-]{36}$/i.test(id) || token.length !== 64) {
       return json(response, 404, { error: "Compra no encontrada." });
     }
-    const order = database.prepare("SELECT * FROM freefire_orders WHERE id = ?").get(id);
+    const order = await execute(getSupabase().from("freefire_orders").select("*").eq("id", id).maybeSingle());
     if (!order || !crypto.timingSafeEqual(
       Buffer.from(order.access_token_hash, "hex"),
       crypto.createHash("sha256").update(token).digest()
     )) return json(response, 404, { error: "Compra no encontrada." });
     let pinCode = null;
     if (order.status === "paid" && order.fulfillment_status === "assigned") {
-      const pin = database.prepare(`
-        SELECT codigo_pin, pin_iv, pin_auth_tag
-        FROM pines WHERE order_id = ? AND estado = 'vendido'
-      `).get(order.id);
+      const pin = await execute(getSupabase().from("pines")
+        .select("codigo_pin,pin_iv,pin_auth_tag")
+        .eq("order_id", order.id).eq("estado", "vendido").maybeSingle());
       if (!pin) {
         return json(response, 500, { error: "No se encontró el PIN asociado. Contacta con soporte." });
       }
@@ -585,7 +521,7 @@ async function handleApi(request, response, url) {
   return json(response, 404, { error: "Ruta API no encontrada." });
 }
 
-const server = http.createServer(async (request, response) => {
+async function handleRequest(request, response) {
   let url;
   try {
     url = new URL(request.url, "http://localhost");
@@ -623,15 +559,20 @@ const server = http.createServer(async (request, response) => {
     response.writeHead(200, { "Content-Type": contentTypes[path.extname(requestedFile)] || "application/octet-stream" });
     response.end(request.method === "HEAD" ? undefined : contents);
   });
-});
+}
 
-setInterval(() => {
-  refreshCatalog().catch(error => {
-    console.error("No se pudo actualizar el catálogo en la revisión programada:", error);
+if (require.main === module) {
+  const server = http.createServer(handleRequest);
+  setInterval(() => {
+    refreshCatalog().catch(error => {
+      console.error("No se pudo actualizar el catálogo en la revisión programada:", error);
+    });
+  }, PRICE_CACHE_MS).unref();
+
+  const port = Number(process.env.PORT) || 4173;
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`Vértice disponible en http://localhost:${port}`);
   });
-}, PRICE_CACHE_MS).unref();
+}
 
-const port = Number(process.env.PORT) || 4173;
-server.listen(port, "0.0.0.0", () => {
-  console.log(`Vértice disponible en http://localhost:${port}`);
-});
+module.exports = handleRequest;

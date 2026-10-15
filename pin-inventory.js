@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const { execute } = require("./supabase-store");
 
 function decodeEncryptionKey(encodedKey) {
   if (typeof encodedKey !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(encodedKey)) {
@@ -32,7 +33,7 @@ function decryptPin(pin, key) {
   ]).toString("utf8");
 }
 
-function importPins(database, encryptionKey, packageId, codes, createdAt = new Date().toISOString()) {
+async function importPins(client, encryptionKey, packageId, codes, createdAt = new Date().toISOString()) {
   if (typeof packageId !== "string" || !/^latin-gm-\d+$/.test(packageId)) {
     throw Object.assign(new Error("El paquete indicado no es válido."), { statusCode: 400 });
   }
@@ -47,21 +48,22 @@ function importPins(database, encryptionKey, packageId, codes, createdAt = new D
     throw Object.assign(new Error("La lista contiene códigos duplicados."), { statusCode: 409 });
   }
 
-  const insert = database.prepare(`
-    INSERT INTO pines
-      (paquete_id, codigo_pin, codigo_pin_hash, pin_iv, pin_auth_tag, estado, created_at)
-    VALUES (?, ?, ?, ?, ?, 'disponible', ?)
-  `);
-  database.exec("BEGIN IMMEDIATE");
+  const rows = normalized.map(code => {
+    const encrypted = encryptPin(code, encryptionKey);
+    return {
+      paquete_id: packageId,
+      codigo_pin: encrypted.ciphertext,
+      codigo_pin_hash: encrypted.hash,
+      pin_iv: encrypted.iv,
+      pin_auth_tag: encrypted.authTag,
+      estado: "disponible",
+      created_at: createdAt
+    };
+  });
   try {
-    normalized.forEach(code => {
-      const encrypted = encryptPin(code, encryptionKey);
-      insert.run(packageId, encrypted.ciphertext, encrypted.hash, encrypted.iv, encrypted.authTag, createdAt);
-    });
-    database.exec("COMMIT");
+    await execute(client.from("pines").insert(rows));
   } catch (error) {
-    database.exec("ROLLBACK");
-    if (String(error.message).includes("UNIQUE constraint failed")) {
+    if (error.code === "23505") {
       throw Object.assign(new Error("Uno o más PIN ya fueron importados; no se agregó ningún código."), { statusCode: 409 });
     }
     throw error;
@@ -69,115 +71,35 @@ function importPins(database, encryptionKey, packageId, codes, createdAt = new D
   return { imported: normalized.length, packageId };
 }
 
-function assignPinToOrder(database, encryptionKey, orderId, paymentId, paidAt = new Date().toISOString()) {
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    const order = database.prepare("SELECT * FROM freefire_orders WHERE id = ?").get(orderId);
-    if (!order) throw Object.assign(new Error("No existe la compra asociada al pago."), { statusCode: 404 });
-    if (order.payment_id && order.payment_id !== String(paymentId)) {
-      throw Object.assign(new Error("La compra ya está asociada a otro pago."), { statusCode: 409 });
-    }
-
-    if (order.fulfillment_status === "assigned") {
-      const existingPin = database.prepare(
-        "SELECT * FROM pines WHERE order_id = ? AND estado = 'vendido'"
-      ).get(order.id);
-      if (!existingPin) throw new Error(`La orden ${order.id} indica PIN asignado pero no tiene un PIN vendido asociado.`);
-      if (!order.payment_id) {
-        database.prepare("UPDATE freefire_orders SET payment_id = ? WHERE id = ?")
-          .run(String(paymentId), order.id);
-      }
-      const updatedOrder = database.prepare("SELECT * FROM freefire_orders WHERE id = ?").get(order.id);
-      const pin = decryptPin(existingPin, encryptionKey);
-      database.exec("COMMIT");
-      return {
-        status: "assigned",
-        order: updatedOrder,
-        pin
-      };
-    }
-    if (order.fulfillment_status === "out_of_stock_pending_refund") {
-      database.exec("COMMIT");
-      return { status: "out_of_stock_pending_refund", order, pin: null };
-    }
-    if (order.status !== "payment_pending") {
-      throw Object.assign(new Error("La compra no está pendiente de pago."), { statusCode: 409 });
-    }
-
-    const availablePin = database.prepare(`
-      SELECT * FROM pines
-      WHERE paquete_id = ? AND estado = 'disponible'
-      ORDER BY id
-      LIMIT 1
-    `).get(order.package_id);
-    if (!availablePin) {
-      database.prepare(`
-        UPDATE freefire_orders
-        SET status = 'out_of_stock_pending_refund',
-            fulfillment_status = 'out_of_stock_pending_refund',
-            payment_id = ?,
-            paid_at = ?
-        WHERE id = ?
-      `).run(String(paymentId), paidAt, order.id);
-      const updatedOrder = database.prepare("SELECT * FROM freefire_orders WHERE id = ?").get(order.id);
-      database.exec("COMMIT");
-      return {
-        status: "out_of_stock_pending_refund",
-        order: updatedOrder,
-        pin: null
-      };
-    }
-
-    const updatePin = database.prepare(`
-      UPDATE pines
-      SET estado = 'vendido', order_id = ?, fecha_venta = ?
-      WHERE id = ? AND estado = 'disponible'
-    `).run(order.id, paidAt, availablePin.id);
-    if (Number(updatePin.changes) !== 1) {
-      throw new Error("No se pudo reservar exclusivamente el PIN disponible.");
-    }
-    database.prepare(`
-      UPDATE freefire_orders
-      SET status = 'paid', fulfillment_status = 'assigned',
-          payment_id = ?, paid_at = ?
-      WHERE id = ?
-    `).run(String(paymentId), paidAt, order.id);
-    const updatedOrder = database.prepare("SELECT * FROM freefire_orders WHERE id = ?").get(order.id);
-    const pin = decryptPin(availablePin, encryptionKey);
-    database.exec("COMMIT");
-    return {
-      status: "assigned",
-      order: updatedOrder,
-      pin
-    };
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
+async function assignPinToOrder(client, encryptionKey, orderId, paymentId, paidAt = new Date().toISOString()) {
+  const result = await execute(client.rpc("assign_pin_to_order", {
+    p_order_id: orderId,
+    p_payment_id: String(paymentId),
+    p_paid_at: paidAt
+  }));
+  if (result.status === "assigned") {
+    return { ...result, pin: decryptPin(result.pin, encryptionKey) };
   }
+  return { ...result, pin: null };
 }
 
-function claimOrderEmail(database, orderId, now = new Date().toISOString()) {
-  const staleBefore = new Date(Date.parse(now) - 5 * 60 * 1000).toISOString();
-  const result = database.prepare(`
-    UPDATE freefire_orders
-    SET email_sending_at = ?
-    WHERE id = ? AND email_sent_at IS NULL
-      AND (email_sending_at IS NULL OR email_sending_at < ?)
-  `).run(now, orderId, staleBefore);
-  return Number(result.changes) === 1;
+async function claimOrderEmail(client, orderId, now = new Date().toISOString()) {
+  return execute(client.rpc("claim_order_email", {
+    p_order_id: orderId,
+    p_now: now
+  }));
 }
 
-function markOrderEmailSent(database, orderId, sentAt = new Date().toISOString()) {
-  database.prepare(`
-    UPDATE freefire_orders
-    SET email_sent_at = ?, email_sending_at = NULL
-    WHERE id = ?
-  `).run(sentAt, orderId);
+async function markOrderEmailSent(client, orderId, sentAt = new Date().toISOString()) {
+  await execute(client.from("freefire_orders")
+    .update({ email_sent_at: sentAt, email_sending_at: null })
+    .eq("id", orderId));
 }
 
-function releaseOrderEmailClaim(database, orderId) {
-  database.prepare("UPDATE freefire_orders SET email_sending_at = NULL WHERE id = ?")
-    .run(orderId);
+async function releaseOrderEmailClaim(client, orderId) {
+  await execute(client.from("freefire_orders")
+    .update({ email_sending_at: null })
+    .eq("id", orderId));
 }
 
 module.exports = {
