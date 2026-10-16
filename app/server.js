@@ -96,9 +96,10 @@ async function getOfficialUsdArsRate() {
 }
 
 async function refreshCatalog() {
+  const supabase = getSupabase();
   const [previous, setting] = await Promise.all([
-    getCachedPackages(),
-    execute(getSupabase().from("app_settings").select("value").eq("key", "catalog_updated_at").maybeSingle())
+    execute(supabase.rpc("get_freefire_packages")),
+    execute(supabase.from("app_settings").select("value").eq("key", "catalog_updated_at").maybeSingle())
   ]);
   const lastRefresh = setting?.value || null;
   const cacheAge = lastRefresh ? Date.now() - Date.parse(lastRefresh) : Infinity;

@@ -1,4 +1,4 @@
-const { createClient } = require("../config/node_modules/@supabase/supabase-js");
+const { createClient } = require("@supabase/supabase-js");
 
 let client;
 

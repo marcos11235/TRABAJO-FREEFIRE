@@ -7,11 +7,14 @@ El catálogo y el flujo de compra están enfocados exclusivamente en paquetes de
 ## Estructura
 
 ```text
-index.html              Entrada web (único archivo en la raíz)
+index.html              Página HTML de entrada
 assets/                 JavaScript del navegador y estilos
 api/                    Función serverless catch-all de Vercel
 app/                    API, Supabase, inventario, precios y proveedor
-config/                 package.json, lockfile, .env.example y .gitignore
+config/                 Plantilla de variables de entorno
+package.json            Dependencias y comandos de Node.js
+package-lock.json       Versiones bloqueadas de dependencias
+.gitignore              Exclusión de secretos y dependencias instaladas
 database/schema.sql     Esquema PostgreSQL y funciones RPC de Supabase
 docs/README.md          Esta guía
 tests/                  Pruebas de precios, scraper e inventario
@@ -32,13 +35,13 @@ Requiere Node.js 22.x.
 
    Guarda los resultados en `PIN_ENCRYPTION_KEY` e `INVENTORY_ADMIN_TOKEN`. **Conserva una copia segura de `PIN_ENCRYPTION_KEY`**: sin ella no se podrán recuperar los códigos cifrados.
 4. Configura las credenciales de Mercado Pago, la URL pública HTTPS y Resend.
-5. Para instalar dependencias localmente, ejecuta `npm --prefix config install`; inicia el servidor con `npm --prefix config start` y ejecuta las pruebas con `npm --prefix config test`.
+5. Para instalar dependencias localmente, ejecuta `npm install`; inicia el servidor con `npm start` y ejecuta las pruebas con `npm test`.
 
 ### Despliegue en Vercel
 
-La raíz del repositorio contiene únicamente `index.html`; los demás archivos están agrupados en carpetas. `.gitignore` está en `config/` y excluye `config/.env` y `config/node_modules/`. Sube las carpetas `api/`, `app/`, `assets/`, `config/`, `database/`, `docs/` y `tests/` junto con `index.html`. No subas secretos ni dependencias instaladas.
+La página `index.html` permanece en la raíz y el código está agrupado en carpetas. Los manifiestos de Node (`package.json` y `package-lock.json`) y `.gitignore` también deben permanecer en la raíz: Vercel los necesita para instalar y empaquetar la función API. `.gitignore` excluye `config/.env` y `node_modules/`. No subas secretos ni dependencias instaladas.
 
-En Vercel, importa el repositorio con la raíz del proyecto como directorio raíz y selecciona **Other** como framework. En **Build & Development Settings**, configura el comando de instalación como `npm install --prefix config`; deja el comando de build y el directorio de salida vacíos. Selecciona Node.js 22.x en la configuración de runtime. Vercel sirve `index.html` desde la raíz, los recursos desde `/assets/` y detecta `api/[...path].js` como función serverless para las rutas `/api/*`. No configures un directorio de salida ni reglas de rutas personalizadas.
+En Vercel, importa el repositorio con la raíz del proyecto como directorio raíz y selecciona **Other** como framework. Deja el comando de instalación predeterminado basado en `package-lock.json` (no uses `npm --prefix config install`); deja el comando de build y el directorio de salida vacíos. Selecciona Node.js 22.x en la configuración de runtime. Vercel sirve `index.html` desde la raíz, los recursos desde `/assets/` y detecta `api/[...path].js` como función serverless para las rutas `/api/*`. No configures reglas de rutas personalizadas.
 
 Agrega en **Project Settings → Environment Variables** las mismas variables de `config/.env.example` que necesita el servidor, incluidas `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `PIN_ENCRYPTION_KEY`, `INVENTORY_ADMIN_TOKEN`, las credenciales de Mercado Pago y Resend, y `PUBLIC_BASE_URL` con la URL HTTPS final del proyecto. La clave `service_role` debe permanecer únicamente en el entorno del servidor y no debe añadirse al frontend. Configura el webhook de Mercado Pago en `https://<tu-dominio>/api/webhooks/mercadopago`.
 
@@ -66,7 +69,7 @@ Invoke-RestMethod -Uri "https://tu-dominio.example/api/admin/pines/stock" -Heade
 
 La importación admite entre 1 y 1000 códigos; rechaza duplicados y la inserción por lote de PostgreSQL se confirma completa o no se confirma. `codigo_pin` se cifra con AES-256-GCM y el IV/tag se guardan aparte; un HMAC evita volver a importar el mismo PIN sin almacenar su valor original. La tabla `pines` incluye estados `disponible`, `reservado` y `vendido`. La asignación se ejecuta en una función PostgreSQL transaccional con bloqueo de filas y asocia un solo PIN por orden, incluso ante webhooks concurrentes o repetidos.
 
-Las pruebas automatizadas usan un cliente Supabase simulado para verificar la importación cifrada, la asignación idempotente y el manejo de inventario agotado; se ejecutan con `npm --prefix config test`. No hay un endpoint de simulación expuesto en producción que pueda alterar inventario real.
+Las pruebas automatizadas usan un cliente Supabase simulado para verificar la importación cifrada, la asignación idempotente y el manejo de inventario agotado; se ejecutan con `npm test`. No hay un endpoint de simulación expuesto en producción que pueda alterar inventario real.
 
 ## Pago, entrega y agotamiento
 

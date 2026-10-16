@@ -277,8 +277,7 @@ async function loadFreeFireCatalog() {
   if (freefireCatalogPromise) return freefireCatalogPromise;
   freefireCatalogPromise = fetch("/api/freefire/packages")
     .then(async response => {
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "No se pudo consultar el catálogo.");
+      const data = await readApiResponse(response, "No se pudo consultar el catálogo.");
       freefireCatalog = data;
       renderFreeFirePlans();
     })
@@ -302,6 +301,21 @@ function setInventoryMessage(text, isSuccess = false) {
   const message = document.querySelector("#pins-import-message");
   message.textContent = text;
   message.classList.toggle("is-success", isSuccess);
+}
+
+async function readApiResponse(response, fallbackMessage) {
+  const body = await response.text();
+  let data;
+  try {
+    data = body ? JSON.parse(body) : {};
+  } catch {
+    const detail = body.trim().slice(0, 200);
+    throw new Error(
+      `El servidor respondió HTTP ${response.status} con una respuesta no válida${detail ? `: ${detail}` : "."}`
+    );
+  }
+  if (!response.ok) throw new Error(data.error || fallbackMessage);
+  return data;
 }
 
 function renderInventoryStock(stockRows = []) {
@@ -328,8 +342,7 @@ async function loadInventoryPackages() {
   retryButton.classList.add("hidden");
   try {
     const catalogResponse = await fetch("/api/packages");
-    const catalog = await catalogResponse.json();
-    if (!catalogResponse.ok) throw new Error(catalog.error || "No se pudo cargar el catálogo.");
+    const catalog = await readApiResponse(catalogResponse, "No se pudo cargar el catálogo.");
     if (!Array.isArray(catalog.packages) || catalog.packages.some(item =>
       !item || typeof item.id !== "string" || !item.id ||
       typeof item.label !== "string" || !item.label.trim()
@@ -370,8 +383,7 @@ async function refreshInventoryStock(token = document.querySelector("#pins-admin
     const response = await fetch("/api/admin/pines/stock", {
       headers: { Authorization: `Bearer ${token}` }
     });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "No se pudo consultar el inventario.");
+    const result = await readApiResponse(response, "No se pudo consultar el inventario.");
     renderInventoryStock(result.stock);
     setInventoryMessage("Stock actualizado.", true);
   } catch (error) {
@@ -519,8 +531,7 @@ document.querySelector("#freefire-checkout").addEventListener("submit", async ev
         email: document.querySelector("#freefire-customer-email").value.trim()
       })
     });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "No se pudo iniciar el pago.");
+    const result = await readApiResponse(response, "No se pudo iniciar el pago.");
     if (!result.checkoutUrl) throw new Error("Mercado Pago no devolvió un enlace de pago.");
     window.location.assign(result.checkoutUrl);
   } catch (error) {
@@ -542,8 +553,7 @@ async function refreshFreeFireOrder(showInitialLoading = false) {
   if (showInitialLoading) title.textContent = "Consultando tu compra...";
   try {
     const response = await fetch(`/api/freefire/orders/${encodeURIComponent(orderId)}?token=${encodeURIComponent(token)}`);
-    const order = await response.json();
-    if (!response.ok) throw new Error(order.error || "No pudimos consultar la compra.");
+    const order = await readApiResponse(response, "No pudimos consultar la compra.");
     reference.textContent = `Compra ${order.orderId} · ${order.packageLabel}`;
     delivery.classList.add("hidden");
     refreshButton.classList.add("hidden");
@@ -656,8 +666,7 @@ document.querySelector("#pins-import-form").addEventListener("submit", async eve
       },
       body: JSON.stringify({ packageId, codes })
     });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "No se pudo cargar el inventario.");
+    const result = await readApiResponse(response, "No se pudo cargar el inventario.");
     document.querySelector("#pins-codes").value = "";
     await loadInventoryPackages();
     setInventoryMessage(`Se agregaron ${result.imported} PINES al paquete seleccionado.`, true);
