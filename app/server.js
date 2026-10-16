@@ -3,6 +3,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { execute, getSupabase } = require("./supabase-store");
+const {
+  clearAdminSessionCookie,
+  createAdminSessionCookie,
+  hasValidAdminSession,
+  isAdminAuthConfigured,
+  verifyAdminCredentials
+} = require("./admin-auth");
 const { scrapeLatinGmPackages } = require("./latin-gm");
 const { PROFIT_MARGIN_ARS, calculateFinalPriceArs } = require("./pricing");
 const {
@@ -38,10 +45,11 @@ function loadEnvFile() {
   }
 }
 
-function json(response, statusCode, data) {
+function json(response, statusCode, data, headers = {}) {
   response.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...headers
   });
   response.end(JSON.stringify(data));
 }
@@ -167,8 +175,7 @@ function checkoutConfigured() {
 
 function inventoryConfigured() {
   return Boolean(
-    process.env.INVENTORY_ADMIN_TOKEN &&
-    process.env.INVENTORY_ADMIN_TOKEN.length >= 32 &&
+    isAdminAuthConfigured() &&
     process.env.SUPABASE_URL &&
     process.env.SUPABASE_SERVICE_ROLE_KEY &&
     (() => {
@@ -180,15 +187,6 @@ function inventoryConfigured() {
       }
     })()
   );
-}
-
-function hasValidInventoryAdminToken(request) {
-  const supplied = /^Bearer (.+)$/.exec(request.headers.authorization || "")?.[1] || "";
-  const configured = process.env.INVENTORY_ADMIN_TOKEN || "";
-  const suppliedBuffer = Buffer.from(supplied);
-  const configuredBuffer = Buffer.from(configured);
-  if (!configured || configured.length < 32 || suppliedBuffer.length !== configuredBuffer.length) return false;
-  return crypto.timingSafeEqual(suppliedBuffer, configuredBuffer);
 }
 
 function createPaymentPreference(order, accessToken) {
@@ -359,6 +357,34 @@ async function handleWebhook(request, url, response) {
 }
 
 async function handleApi(request, response, url) {
+  if (url.pathname === "/api/admin/session" && request.method === "GET") {
+    return json(response, 200, { authenticated: hasValidAdminSession(request) });
+  }
+  if (url.pathname === "/api/admin/session" && request.method === "POST") {
+    if (!isAdminAuthConfigured()) {
+      return json(response, 503, {
+        error: "El acceso de administrador no está configurado. Define ADMIN_PASSWORD y ADMIN_SESSION_SECRET en el servidor."
+      });
+    }
+    try {
+      const input = await readJson(request);
+      if (!input || typeof input !== "object" || Array.isArray(input) ||
+        !verifyAdminCredentials(input.username, input.password)) {
+        return json(response, 401, { error: "Usuario o contraseña de administrador incorrectos." });
+      }
+      return json(response, 200, { authenticated: true }, {
+        "Set-Cookie": createAdminSessionCookie(request)
+      });
+    } catch (error) {
+      if (error.statusCode) return json(response, error.statusCode, { error: error.message });
+      throw error;
+    }
+  }
+  if (url.pathname === "/api/admin/session" && request.method === "DELETE") {
+    return json(response, 200, { authenticated: false }, {
+      "Set-Cookie": clearAdminSessionCookie(request)
+    });
+  }
   if (request.method === "GET" && url.pathname === "/api/health") {
     return json(response, 200, {
       ok: true,
@@ -399,8 +425,8 @@ async function handleApi(request, response, url) {
     }
   }
   if (request.method === "POST" && url.pathname === "/api/admin/pines/import") {
-    if (!hasValidInventoryAdminToken(request)) {
-      return json(response, 401, { error: "Token de administración inválido." });
+    if (!hasValidAdminSession(request)) {
+      return json(response, 401, { error: "Inicia sesión como administrador para cargar PINES." });
     }
     try {
       const input = await readJson(request);
@@ -432,8 +458,8 @@ async function handleApi(request, response, url) {
     }
   }
   if (request.method === "GET" && url.pathname === "/api/admin/pines/stock") {
-    if (!hasValidInventoryAdminToken(request)) {
-      return json(response, 401, { error: "Token de administración inválido." });
+    if (!hasValidAdminSession(request)) {
+      return json(response, 401, { error: "Inicia sesión como administrador para consultar el inventario." });
     }
     const stock = await execute(getSupabase().rpc("get_pin_stock"));
     return json(response, 200, { stock });

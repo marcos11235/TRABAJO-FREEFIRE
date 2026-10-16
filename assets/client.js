@@ -49,24 +49,9 @@ function initializeStore() {
     delete user.notifications;
   });
 
-  let admin = store.users.find(user => user.username === "admin" || user.email === "admin");
-  if (!admin) {
-    admin = {
-      id: "USR-ADMIN",
-      name: "Administrador",
-      username: "admin",
-      email: "admin",
-      password: "admin123",
-      role: "admin",
-      createdAt: new Date().toISOString(),
-      loginCount: 0
-    };
-    store.users.push(admin);
-  } else {
-    admin.username = "admin";
-    admin.role = "admin";
-    admin.password = "admin123";
-  }
+  store.users = store.users.filter(user =>
+    user.role !== "admin" && user.username !== "admin" && user.email !== "admin"
+  );
   saveStore();
 }
 
@@ -123,7 +108,8 @@ function getCurrentView() {
 
 function enterApp(user) {
   currentUser = user;
-  localStorage.setItem(SESSION_KEY, user.id);
+  if (user.role === "admin") localStorage.removeItem(SESSION_KEY);
+  else localStorage.setItem(SESSION_KEY, user.id);
   authScreen.classList.add("hidden");
   document.querySelectorAll(".admin-only").forEach(element => element.classList.toggle("hidden", !isAdmin()));
   document.querySelectorAll(".customer-only").forEach(element => element.classList.toggle("hidden", isAdmin()));
@@ -140,8 +126,12 @@ function enterApp(user) {
 }
 
 function leaveApp() {
+  if (isAdmin()) {
+    fetch("/api/admin/session", { method: "DELETE", credentials: "same-origin" }).catch(error => {
+      console.error("No se pudo cerrar la sesión administrativa en el servidor.", error);
+    });
+  }
   currentUser = null;
-  document.querySelector("#pins-admin-token").value = "";
   document.querySelector("#pins-codes").value = "";
   localStorage.removeItem(SESSION_KEY);
   appShell.classList.add("hidden");
@@ -337,7 +327,6 @@ async function loadInventoryPackages() {
   const select = document.querySelector("#pins-package-id");
   const retryButton = document.querySelector("#pins-retry-packages");
   const selectedPackageId = select.value;
-  const token = document.querySelector("#pins-admin-token").value.trim();
   select.innerHTML = '<option value="">Cargando paquetes...</option>';
   retryButton.classList.add("hidden");
   try {
@@ -359,11 +348,7 @@ async function loadInventoryPackages() {
     }
     if (!inventoryPackageOptions.length) setInventoryMessage("El catálogo no contiene paquetes para importar.");
 
-    if (token) await refreshInventoryStock(token);
-    else renderInventoryStock(inventoryPackageOptions.map(item => ({
-      paquete_id: item.id,
-      disponible: item.stock_available
-    })));
+    await refreshInventoryStock();
   } catch (error) {
     select.innerHTML = '<option value="">No se pudieron cargar los paquetes</option>';
     retryButton.classList.remove("hidden");
@@ -375,14 +360,12 @@ async function loadInventoryPackages() {
   }
 }
 
-async function refreshInventoryStock(token = document.querySelector("#pins-admin-token").value.trim()) {
+async function refreshInventoryStock() {
   if (!isAdmin()) return;
   const list = document.querySelector("#pins-stock-list");
   list.textContent = "Consultando inventario...";
   try {
-    const response = await fetch("/api/admin/pines/stock", {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const response = await fetch("/api/admin/pines/stock", { credentials: "same-origin" });
     const result = await readApiResponse(response, "No se pudo consultar el inventario.");
     renderInventoryStock(result.stock);
     setInventoryMessage("Stock actualizado.", true);
@@ -422,7 +405,7 @@ function recordLogin(user) {
   user.loginCount = (Number(user.loginCount) || 0) + 1;
 }
 
-authForm.addEventListener("submit", event => {
+authForm.addEventListener("submit", async event => {
   event.preventDefault();
   authMessage.textContent = "";
   const name = document.querySelector("#name-input").value.trim();
@@ -451,6 +434,32 @@ authForm.addEventListener("submit", event => {
     store.users.push(user);
     saveStore();
     enterApp(user);
+    return;
+  }
+
+  if (email === "admin") {
+    const submitButton = document.querySelector("#auth-submit");
+    submitButton.disabled = true;
+    try {
+      const response = await fetch("/api/admin/session", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: email, password })
+      });
+      await readApiResponse(response, "No se pudo iniciar la sesión de administrador.");
+      enterApp({
+        id: "USR-ADMIN",
+        name: "Administrador",
+        username: "admin",
+        email: "admin",
+        role: "admin"
+      });
+    } catch (error) {
+      authMessage.textContent = error.message;
+    } finally {
+      submitButton.disabled = false;
+    }
     return;
   }
 
@@ -649,12 +658,11 @@ document.querySelector("#freefire-result-back").addEventListener("click", () => 
 document.querySelector("#pins-import-form").addEventListener("submit", async event => {
   event.preventDefault();
   if (!isAdmin()) return;
-  const token = document.querySelector("#pins-admin-token").value.trim();
   const packageId = document.querySelector("#pins-package-id").value;
   const codes = document.querySelector("#pins-codes").value;
   const submitButton = document.querySelector("#pins-import-submit");
-  if (!token || !packageId || !codes.trim()) {
-    setInventoryMessage("Completa el token, el paquete y al menos un PIN.");
+  if (!packageId || !codes.trim()) {
+    setInventoryMessage("Selecciona un paquete y agrega al menos un PIN.");
     return;
   }
 
@@ -664,9 +672,9 @@ document.querySelector("#pins-import-form").addEventListener("submit", async eve
     const response = await fetch("/api/admin/pines/import", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
       },
+      credentials: "same-origin",
       body: JSON.stringify({ packageId, codes })
     });
     const result = await readApiResponse(response, "No se pudo cargar el inventario.");
@@ -682,24 +690,35 @@ document.querySelector("#pins-import-form").addEventListener("submit", async eve
 
 document.querySelector("#pins-refresh-stock").addEventListener("click", async () => {
   if (!isAdmin()) return;
-  const token = document.querySelector("#pins-admin-token").value.trim();
-  if (!token) {
-    setInventoryMessage("Ingresa el token de administrador para consultar el inventario.");
-    return;
-  }
-  await refreshInventoryStock(token);
-});
-
-document.querySelector("#pins-admin-token").addEventListener("change", () => {
-  if (isAdmin() && getCurrentView() === "pins") loadInventoryPackages();
+  await refreshInventoryStock();
 });
 
 document.querySelector("#pins-retry-packages").addEventListener("click", () => {
   if (isAdmin()) loadInventoryPackages();
 });
 
-const savedSession = localStorage.getItem(SESSION_KEY);
-const sessionUser = store.users.find(user => user.id === savedSession);
-if (sessionUser) enterApp(sessionUser);
-else setAuthMode("login");
+async function restoreSavedSession() {
+  try {
+    const response = await fetch("/api/admin/session", { credentials: "same-origin" });
+    const result = await readApiResponse(response, "No se pudo verificar la sesión administrativa.");
+    if (result.authenticated) {
+      enterApp({
+        id: "USR-ADMIN",
+        name: "Administrador",
+        username: "admin",
+        email: "admin",
+        role: "admin"
+      });
+      return;
+    }
+  } catch (error) {
+    console.error("No se pudo restaurar la sesión administrativa.", error);
+  }
+  const savedSession = localStorage.getItem(SESSION_KEY);
+  const sessionUser = store.users.find(user => user.id === savedSession);
+  if (sessionUser) enterApp(sessionUser);
+  else setAuthMode("login");
+}
+
+restoreSavedSession();
 showFreeFirePaymentReturn();

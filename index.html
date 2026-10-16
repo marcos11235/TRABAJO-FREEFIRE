@@ -51,7 +51,7 @@
           <p id="auth-message" class="form-message" role="alert" aria-live="polite"></p>
           <button id="auth-submit" class="button button-dark button-wide" type="submit">Entrar al panel <span aria-hidden="true">&#8594;</span></button>
         </form>
-        <p class="auth-footnote">Prototipo local: las cuentas, accesos y operaciones se guardan únicamente en este navegador. No uses datos sensibles.</p>
+        <p class="auth-footnote">Las cuentas de revendedor son locales. Para administración, inicia sesión con el usuario <strong>admin</strong> y la contraseña configurada por el responsable del servidor.</p>
       </div>
     </section>
   </main>
@@ -126,10 +126,6 @@
           <div class="inventory-layout">
             <form id="pins-import-form" class="form-panel">
               <div class="panel-heading"><span class="panel-index">01</span><div><h2>Cargar códigos</h2><p>El lote completo se importa o se rechaza; no se guardan lotes parciales.</p></div></div>
-              <label class="field">Token de administrador
-                <input id="pins-admin-token" type="password" autocomplete="off" required minlength="32" placeholder="Pega tu token de inventario">
-                <small>Se usa solo durante esta sesión; no se guarda en el navegador.</small>
-              </label>
               <label class="field">Paquete de diamantes
                 <select id="pins-package-id" required><option value="">Cargando paquetes...</option></select>
               </label>
@@ -147,7 +143,7 @@
               <div id="pins-stock-list" class="pins-stock-list" aria-live="polite"></div>
             </section>
           </div>
-          <div class="demo-banner"><span class="demo-banner-icon">!</span><p>El administrador debe proteger el token y la clave de cifrado. No ingreses PINES reales en una web de prueba o conexión sin HTTPS.</p></div>
+          <div class="demo-banner"><span class="demo-banner-icon">!</span><p>El acceso administrativo se valida en el servidor. No ingreses PINES reales en una web de prueba o conexión sin HTTPS.</p></div>
         </section>
 
         <section class="view-section" id="view-history" aria-labelledby="history-title">
