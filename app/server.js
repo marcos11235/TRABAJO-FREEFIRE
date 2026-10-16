@@ -366,8 +366,24 @@ async function handleApi(request, response, url) {
       inventoryConfigured: inventoryConfigured()
     });
   }
-  if (request.method === "GET" &&
-    (url.pathname === "/api/packages" || url.pathname === "/api/freefire/packages")) {
+  if (request.method === "GET" && url.pathname === "/api/packages") {
+    try {
+      const packages = await getCachedPackages();
+      return json(response, 200, {
+        packages,
+        marginArs: PROFIT_MARGIN_ARS,
+        currency: "ARS",
+        exchangeRate: packages[0]?.usd_ars_rate || null,
+        paymentConfigured: checkoutConfigured()
+      });
+    } catch (error) {
+      console.error("No se pudo leer el catálogo guardado para el inventario de PINES:", error);
+      return json(response, 503, {
+        error: `No se pudieron cargar los paquetes guardados en Supabase. Verifica SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY y que database/schema.sql esté aplicado. Detalle: ${error.message}`
+      });
+    }
+  }
+  if (request.method === "GET" && url.pathname === "/api/freefire/packages") {
     try {
       const catalog = await refreshCatalog();
       return json(response, 200, {

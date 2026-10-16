@@ -53,7 +53,7 @@ La aplicación convierte los precios del catálogo de Latin GM a ARS usando la c
 
 El panel de administración incluye **Inventario de PINES**: selecciona el paquete, ingresa el token administrativo y pega los códigos en el cuadro de texto, uno por línea. Pulsa **Agregar PINES al inventario**; el stock se actualiza al terminar. También puedes actualizar el stock con el botón de la sección.
 
-El selector consulta `GET /api/packages`, que devuelve los paquetes guardados en Supabase junto con su identificador y stock. `GET /api/freefire/packages` continúa disponible para compatibilidad. Una instalación nueva incluye paquetes base Free Fire en `database/schema.sql`; si Latin GM o la cotización no responden, el servidor entrega esos datos o la caché de Supabase y pausa las ventas hasta recuperar precios actualizados, pero el selector sigue disponible para cargar PINES.
+El selector consulta `GET /api/packages`, que devuelve directamente los paquetes guardados en Supabase junto con su identificador y stock, sin depender de que Latin GM o la cotización estén disponibles. `GET /api/freefire/packages` consulta/actualiza el catálogo de venta. Una instalación nueva incluye paquetes base Free Fire en `database/schema.sql`; si el selector no puede cargar los paquetes, verifica las variables de Supabase del servidor y que hayas ejecutado el esquema completo. Si Latin GM o la cotización no responden, el servidor entrega los datos guardados y pausa las ventas hasta recuperar precios actualizados, pero el selector sigue disponible para cargar PINES.
 
 El endpoint acepta códigos por lote y el token administrativo, por ejemplo:
 

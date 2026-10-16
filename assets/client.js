@@ -136,7 +136,7 @@ function enterApp(user) {
   document.querySelector("#selected-catalog-label").classList.remove("hidden");
   renderAll();
   appShell.classList.remove("hidden");
-  setView(isAdmin() ? "pins" : "purchase");
+  setView(isAdmin() ? "pins" : "purchase", false);
 }
 
 function leaveApp() {
@@ -466,7 +466,10 @@ authForm.addEventListener("submit", event => {
 
 document.querySelector("#logout-button").addEventListener("click", leaveApp);
 document.querySelector("#back-button").addEventListener("click", goBack);
-
+document.querySelector("#topbar-brand").addEventListener("click", event => {
+  event.preventDefault();
+  setView(isAdmin() ? "pins" : "overview");
+});
 document.querySelector("#nav-toggle").addEventListener("click", () => {
   const nav = document.querySelector("#main-nav");
   const expanded = document.querySelector("#nav-toggle").getAttribute("aria-expanded") === "true";
